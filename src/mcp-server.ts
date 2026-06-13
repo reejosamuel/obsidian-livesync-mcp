@@ -122,6 +122,9 @@ export class MCPServer {
     this.client = client;
     this.opts = opts;
     this.server = new Server({ name: "obsidian-livesync-mcp", version: "0.1.0" }, { capabilities: { tools: {} } });
+    (this.server as any).oninitialized = () => {
+      this.opts.logger.info("Client initialized");
+    };
     this.setupHandlers();
   }
 
@@ -266,6 +269,12 @@ export class MCPServer {
   async start(transport: "stdio" | "sse" | "http") {
     if (transport === "stdio") {
       const stdioTransport = new StdioServerTransport();
+      stdioTransport.onerror = (err) => {
+        this.opts.logger.error("Transport error", { error: err.message });
+      };
+      stdioTransport.onclose = () => {
+        this.opts.logger.warn("Transport closed");
+      };
       await this.server.connect(stdioTransport);
       this.opts.logger.info("Server started", { transport: "stdio" });
     } else {

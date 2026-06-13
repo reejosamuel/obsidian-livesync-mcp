@@ -22,6 +22,19 @@ const credentials = config.username
 const url = `${protocol}://${credentials}${baseHost}/${config.dbname}`;
 const healthCouchdbUrl = `${protocol}://${baseHost}`;
 
+log.info("Config loaded", {
+  hostname: config.hostname,
+  dbname: config.dbname,
+  username: config.username || "(none)",
+  passphrase: config.passphrase ? "***" : "(none)",
+  mcpTransport: config.mcpTransport,
+  mcpPort: config.mcpPort,
+  logLevel: config.logLevel,
+  cacheTtl: config.cacheTtl,
+  requestTimeout: config.requestTimeout,
+  nodeVersion: process.version,
+});
+
 const client = new CouchDBClient(url, config.passphrase, {
   cacheTtl: config.cacheTtl,
   requestTimeout: config.requestTimeout,
@@ -39,6 +52,14 @@ async function shutdown(signal: string) {
   process.exit(0);
 }
 
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err);
+  process.exit(1);
+});
+process.on("unhandledRejection", (err) => {
+  console.error("UNHANDLED REJECTION:", err);
+  process.exit(1);
+});
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 

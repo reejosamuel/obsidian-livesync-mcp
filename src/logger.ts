@@ -23,7 +23,7 @@ export class Logger {
       msg,
       ...attrs,
     };
-    const stream = level === "error" ? process.stderr : process.stdout;
+    const stream = process.stderr;
     stream.write(JSON.stringify(entry) + "\n");
   }
 
