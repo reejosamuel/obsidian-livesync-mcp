@@ -244,6 +244,20 @@ export class CouchDBClient {
     }
   }
 
+  async renameFile(oldPath: string, newPath: string): Promise<boolean> {
+    const content = await this.getFileContent(oldPath);
+    if (content === null) return false;
+
+    const existing = await this.getFileContent(newPath);
+    if (existing !== null) {
+      throw new Error(`Target path already exists: ${newPath}`);
+    }
+
+    await this.storeContent(newPath, content);
+    await this.deleteFile(oldPath);
+    return true;
+  }
+
   async search(query: string): Promise<{
     results: SearchResult[];
     truncated: boolean;

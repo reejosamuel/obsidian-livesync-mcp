@@ -109,6 +109,18 @@ const ALL_TOOLS: Tool[] = [
       required: ["path"],
     },
   },
+  {
+    name: "rename_file",
+    description: "Rename or move a file to a new path",
+    inputSchema: {
+      type: "object",
+      properties: {
+        oldPath: { type: "string", description: "Current file path" },
+        newPath: { type: "string", description: "New file path" },
+      },
+      required: ["oldPath", "newPath"],
+    },
+  },
 ];
 
 export class MCPServer {
@@ -266,6 +278,18 @@ export class MCPServer {
               result = { content: [{ type: "text", text: `File not found: ${deletePath}` }], isError: true };
             } else {
               result = { content: [{ type: "text", text: `Deleted: ${deletePath}` }] };
+            }
+            break;
+          }
+
+          case "rename_file": {
+            const oldPath = args?.oldPath as string;
+            const newPath = args?.newPath as string;
+            const renamed = await this.client.renameFile(oldPath, newPath);
+            if (!renamed) {
+              result = { content: [{ type: "text", text: `File not found: ${oldPath}` }], isError: true };
+            } else {
+              result = { content: [{ type: "text", text: `Renamed: ${oldPath} → ${newPath}` }] };
             }
             break;
           }

@@ -134,6 +134,30 @@ describe("CouchDBClient", () => {
     });
   });
 
+  describe("renameFile", () => {
+    it("returns false for non-existent source", async () => {
+      mockDbGet.mockRejectedValue({ status: 404 });
+      const { CouchDBClient } = await import("./couchdb.js");
+      const client = new CouchDBClient("http://localhost:5984/db", "testphrase");
+      const result = await client.renameFile("nonexistent.md", "new.md");
+      expect(result).toBe(false);
+    });
+
+    it("throws if target path already exists", async () => {
+      const doc = {
+        _id: "exists.md",
+        type: "plain",
+        path: "exists.md",
+        children: [],
+        deleted: false,
+      };
+      mockDbGet.mockResolvedValue(doc);
+      const { CouchDBClient } = await import("./couchdb.js");
+      const client = new CouchDBClient("http://localhost:5984/db", "testphrase");
+      await expect(client.renameFile("old.md", "exists.md")).rejects.toThrow("Target path already exists");
+    });
+  });
+
   describe("getFileContent", () => {
     it("returns null for non-existent file", async () => {
       mockDbGet.mockRejectedValue({ status: 404 });
