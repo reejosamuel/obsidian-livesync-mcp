@@ -12,4 +12,4 @@ EXPOSE 3100
 ENV MCP_TRANSPORT=sse MCP_PORT=3100
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD wget -qO- http://localhost:3100/health || exit 1
-ENTRYPOINT ["node", "dist/index.js"]
+ENTRYPOINT ["node", "dist/index.cjs"]
