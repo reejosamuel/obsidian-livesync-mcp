@@ -65,7 +65,7 @@ flowchart TB
     LS <-->|HTTP / WS| Couch
     Tools <--> Crypto
     Crypto <-->|PouchDB HTTP adapter<br/>+ transparent decrypt/encrypt| Couch
-    Clients <-->|MCP (stdio / streamable-http)| Tools
+    Clients <-->|MCP stdio / streamable-http| Tools
 ```
 
 **Key points**:
