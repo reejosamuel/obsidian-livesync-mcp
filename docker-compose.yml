@@ -1,29 +1,14 @@
 services:
-  couchdb:
-    image: couchdb:3
-    container_name: couchdb
-    volumes:
-      - couchdb-data:/opt/couchdb/data
-    environment:
-      COUCHDB_USER: ${COUCHDB_USER:-admin}
-      COUCHDB_PASSWORD: ${COUCHDB_PASSWORD:-password}
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5984/_up"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
   obsidian-livesync-mcp:
     build: .
     container_name: obsidian-livesync-mcp
     ports:
       - "${MCP_PORT:-3100}:3100"
     environment:
-      hostname: ${COUCHDB_URL:-http://couchdb:5984}
-      dbname: ${DBNAME:-your-vault-db}
-      username: ${COUCHDB_USER:-admin}
-      password: ${COUCHDB_PASSWORD:-password}
+      hostname: ${COUCHDB_URL:?COUCHDB_URL is required}
+      dbname: ${DBNAME:?DBNAME is required}
+      username: ${COUCHDB_USER:-}
+      password: ${COUCHDB_PASSWORD:-}
       PASSPHRASE: ${PASSPHRASE:?PASSPHRASE is required}
       MCP_API_KEY: ${MCP_API_KEY:-}
       MCP_TRANSPORT: sse
@@ -31,15 +16,9 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       CACHE_TTL: ${CACHE_TTL:-60}
       REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-30000}
-    depends_on:
-      couchdb:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3100/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-
-volumes:
-  couchdb-data:
