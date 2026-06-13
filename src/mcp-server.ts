@@ -116,7 +116,7 @@ export class MCPServer {
   private client: CouchDBClient;
   private opts: MCPServerOptions;
   private httpServer: any = null;
-  private sseTransports: Map<string, any> = new Map();
+  private streamableTransport: any = null;
 
   constructor(client: CouchDBClient, opts: MCPServerOptions) {
     this.client = client;
@@ -263,14 +263,22 @@ export class MCPServer {
     });
   }
 
-  async start(transport: "stdio" | "sse") {
+  async start(transport: "stdio" | "sse" | "http") {
     if (transport === "stdio") {
       const stdioTransport = new StdioServerTransport();
       await this.server.connect(stdioTransport);
       this.opts.logger.info("Server started", { transport: "stdio" });
     } else {
-      const { SSEServerTransport } = await import("@modelcontextprotocol/sdk/server/sse.js");
+      const { StreamableHTTPServerTransport } = await import(
+        "@modelcontextprotocol/sdk/server/streamableHttp.js"
+      );
       const { createServer } = await import("node:http");
+      const crypto = await import("node:crypto");
+
+      this.streamableTransport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => crypto.randomUUID(),
+      });
+      await this.server.connect(this.streamableTransport);
 
       this.httpServer = createServer(async (req, res) => {
         const url = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -284,62 +292,41 @@ export class MCPServer {
           return;
         }
 
-        if (pathname === "/sse") {
-          if (this.opts.apiKey && !this.authenticate(req)) {
-            res.writeHead(401, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Unauthorized" }));
-            return;
-          }
-          if (req.method !== "GET") {
-            res.writeHead(405);
-            res.end("Method not allowed");
-            return;
-          }
-          const transport = new SSEServerTransport("/messages", res);
-          const sessionId = transport.sessionId;
-          this.sseTransports.set(sessionId, transport);
-          transport.onclose = () => {
-            this.sseTransports.delete(sessionId);
-            this.opts.logger.debug("SSE session closed", { sessionId });
-          };
-          await this.server.connect(transport);
-          this.opts.logger.info("SSE client connected", { sessionId });
+        if (this.opts.apiKey && !this.authenticate(req)) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Unauthorized" }));
           return;
         }
 
-        if (pathname === "/messages" && req.method === "POST") {
-          if (this.opts.apiKey && !this.authenticate(req)) {
-            res.writeHead(401, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Unauthorized" }));
-            return;
+        try {
+          await this.streamableTransport.handleRequest(req, res);
+        } catch (err: any) {
+          this.opts.logger.error("Streamable HTTP handler error", { error: err.message });
+          if (!res.headersSent) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Internal server error" }));
           }
-          const sessionId = url.searchParams.get("sessionId");
-          const transport = sessionId ? this.sseTransports.get(sessionId) : null;
-          if (transport) {
-            await transport.handlePostMessage(req, res);
-          } else {
-            res.writeHead(400);
-            res.end("No SSE connection established for this session");
-          }
-          return;
         }
-
-        res.writeHead(404);
-        res.end("Not found");
       });
 
       await new Promise<void>((resolve) => this.httpServer.listen(this.opts.port, resolve));
-      this.opts.logger.info("Server started", { transport: "sse", port: this.opts.port });
+      this.opts.logger.info("Server started", {
+        transport: "streamable-http",
+        port: this.opts.port,
+      });
     }
   }
 
   async stop() {
     this.opts.logger.info("Stopping server");
+    if (this.streamableTransport) {
+      await this.streamableTransport.close();
+      this.streamableTransport = null;
+    }
     if (this.httpServer) {
       await new Promise<void>((resolve) => this.httpServer.close(() => resolve()));
       this.httpServer = null;
     }
-    this.sseTransports.clear();
   }
 
   private authenticate(req: any): boolean {

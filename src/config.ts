@@ -7,7 +7,7 @@ const ConfigSchema = z.object({
   password: z.string().optional().default(""),
   passphrase: z.string().optional().default(""),
   mcpApiKey: z.string().optional().default(""),
-  mcpTransport: z.enum(["stdio", "sse"]).default("stdio"),
+  mcpTransport: z.enum(["stdio", "sse", "http"]).default("stdio"),
   mcpPort: z.coerce.number().int().positive().default(3100),
   logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
   cacheTtl: z.coerce.number().int().nonnegative().default(60),

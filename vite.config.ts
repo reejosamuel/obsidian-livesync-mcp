@@ -4,6 +4,7 @@ import path from "node:path";
 const nodeBuiltins = new Set([
   "fs", "path", "crypto", "events", "async_hooks", "stream", "buffer",
   "string_decoder", "util", "assert", "tty", "os", "url", "http", "https",
+  "http2",
   "net", "tls", "zlib", "querystring", "punycode", "child_process",
   "cluster", "dgram", "dns", "domain", "module", "process", "readline",
   "repl", "timers", "tls", "v8", "vm", "worker_threads", "perf_hooks",
