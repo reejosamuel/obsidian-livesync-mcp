@@ -12,8 +12,8 @@ import { IDPrefixes, SALT_OF_PASSPHRASE } from "@lib/common/models/shared.const.
 import { EntryTypes } from "@lib/common/models/db.const";
 import type { DocumentID } from "@lib/common/models/db.type";
 import { path2id_base } from "@lib/string_and_binary/path";
+import { E2EEAlgorithms } from "@lib/common/models/setting.const";
 import { enableEncryption } from "@lib/pouchdb/encryption";
-import type { E2EEAlgorithm } from "@lib/common/types";
 import crypto from "node:crypto";
 
 export interface FileInfo {
@@ -62,7 +62,7 @@ export class CouchDBClient {
         false,  // useDynamicIterationCount
         true,   // migrationDecrypt — decrypt V1-encrypted data too
         () => this.getPbkdf2Salt(),
-        "V2" as E2EEAlgorithm,
+        E2EEAlgorithms.V2,
       );
     }
   }
