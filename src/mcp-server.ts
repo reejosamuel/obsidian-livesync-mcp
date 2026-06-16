@@ -1,7 +1,14 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { ListToolsRequestSchema, CallToolRequestSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+  McpError,
+  ErrorCode,
+  type Tool,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { CouchDBClient } from "./couchdb.js";
+import { version } from "../package.json";
 import { checkHealth } from "./health.js";
 import type { Logger } from "./logger.js";
 import { randomUUID } from "node:crypto";
@@ -142,7 +149,7 @@ export class MCPServer {
   }
 
   private createServer(): Server {
-    const server = new Server({ name: "obsidian-livesync-mcp", version: "0.1.0" }, { capabilities: { tools: {} } });
+    const server = new Server({ name: "obsidian-livesync-mcp", version }, { capabilities: { tools: {}, logging: {} } });
     (server as any).oninitialized = () => {
       this.opts.logger.info("Client initialized");
     };
@@ -303,14 +310,14 @@ export class MCPServer {
           }
 
           default:
-            result = { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
+            throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
         }
 
         this.opts.logger.info("Tool completed", { tool: name, durationMs: Date.now() - start });
         return result;
       } catch (err: any) {
         this.opts.logger.error("Tool failed", { tool: name, error: err.message, durationMs: Date.now() - start });
-        return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+        throw McpError.fromError(ErrorCode.InternalError, err.message);
       }
     });
 
