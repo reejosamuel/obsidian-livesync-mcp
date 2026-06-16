@@ -142,10 +142,7 @@ export class MCPServer {
   }
 
   private createServer(): Server {
-    const server = new Server(
-      { name: "obsidian-livesync-mcp", version: "0.1.0" },
-      { capabilities: { tools: {} } },
-    );
+    const server = new Server({ name: "obsidian-livesync-mcp", version: "0.1.0" }, { capabilities: { tools: {} } });
     (server as any).oninitialized = () => {
       this.opts.logger.info("Client initialized");
     };
@@ -365,9 +362,8 @@ export class MCPServer {
             }
             await session.transport.handleRequest(req, res);
           } else if (req.method === "POST") {
-            const { StreamableHTTPServerTransport } = await import(
-              "@modelcontextprotocol/sdk/server/streamableHttp.js"
-            );
+            const { StreamableHTTPServerTransport } =
+              await import("@modelcontextprotocol/sdk/server/streamableHttp.js");
 
             const server = this.createServer();
             const transport = new StreamableHTTPServerTransport({
