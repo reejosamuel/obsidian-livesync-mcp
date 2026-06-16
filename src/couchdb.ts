@@ -13,6 +13,7 @@ import { EntryTypes } from "@lib/common/models/db.const";
 import type { DocumentID } from "@lib/common/models/db.type";
 import { path2id_base } from "@lib/string_and_binary/path";
 import { enableEncryption } from "@lib/pouchdb/encryption";
+import { E2EEAlgorithms } from "@lib/common/types";
 import crypto from "node:crypto";
 
 export interface FileInfo {
@@ -55,14 +56,7 @@ export class CouchDBClient {
     this.requestTimeout = options?.requestTimeout ?? 30000;
 
     if (this.passphrase) {
-      enableEncryption(
-        this.db as any,
-        this.passphrase,
-        false,
-        false,
-        () => this.getPbkdf2Salt(),
-        "V2",
-      );
+      enableEncryption(this.db as any, this.passphrase, false, false, () => this.getPbkdf2Salt(), E2EEAlgorithms.V2);
     }
   }
 
@@ -79,7 +73,10 @@ export class CouchDBClient {
       // fall through to default
     }
     const salt = Uint8Array.from(
-      crypto.createHash("sha256").update(this.passphrase || "").digest(),
+      crypto
+        .createHash("sha256")
+        .update(this.passphrase || "")
+        .digest(),
     );
     this.cachedSalt = salt;
     return salt;
@@ -149,9 +146,7 @@ export class CouchDBClient {
       const docId = await this.pathToId(path);
       const chunkHash = crypto.createHash("sha256").update(content).digest("hex");
 
-      const chunkId = this.passphrase
-        ? `${IDPrefixes.EncryptedChunk}${chunkHash}`
-        : `${IDPrefixes.Chunk}${chunkHash}`;
+      const chunkId = this.passphrase ? `${IDPrefixes.EncryptedChunk}${chunkHash}` : `${IDPrefixes.Chunk}${chunkHash}`;
 
       let existingMeta: any = null;
       let oldChunkIds: string[] = [];

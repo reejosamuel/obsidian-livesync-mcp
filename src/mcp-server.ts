@@ -4,12 +4,18 @@ import { ListToolsRequestSchema, CallToolRequestSchema, type Tool } from "@model
 import type { CouchDBClient } from "./couchdb.js";
 import { checkHealth } from "./health.js";
 import type { Logger } from "./logger.js";
+import { randomUUID } from "node:crypto";
 
 interface MCPServerOptions {
   apiKey: string;
   port: number;
   couchdbUrl: string;
   logger: Logger;
+}
+
+interface SessionState {
+  transport: import("@modelcontextprotocol/sdk/server/streamableHttp.js").StreamableHTTPServerTransport;
+  server: Server;
 }
 
 const ALL_TOOLS: Tool[] = [
@@ -125,28 +131,30 @@ const ALL_TOOLS: Tool[] = [
 ];
 
 export class MCPServer {
-  private server: Server;
   private client: CouchDBClient;
   private opts: MCPServerOptions;
   private httpServer: any = null;
-  private streamableTransport: any = null;
+  private sessions: Map<string, SessionState> = new Map();
 
   constructor(client: CouchDBClient, opts: MCPServerOptions) {
     this.client = client;
     this.opts = opts;
-    this.server = new Server({ name: "obsidian-livesync-mcp", version: "0.1.0" }, { capabilities: { tools: {} } });
-    (this.server as any).oninitialized = () => {
-      this.opts.logger.info("Client initialized");
-    };
-    this.setupHandlers();
   }
 
-  private setupHandlers() {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  private createServer(): Server {
+    const server = new Server(
+      { name: "obsidian-livesync-mcp", version: "0.1.0" },
+      { capabilities: { tools: {} } },
+    );
+    (server as any).oninitialized = () => {
+      this.opts.logger.info("Client initialized");
+    };
+
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: ALL_TOOLS,
     }));
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
       const start = Date.now();
       try {
@@ -308,10 +316,13 @@ export class MCPServer {
         return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
       }
     });
+
+    return server;
   }
 
   async start(transport: "stdio" | "sse" | "http") {
     if (transport === "stdio") {
+      const server = this.createServer();
       const stdioTransport = new StdioServerTransport();
       stdioTransport.onerror = (err) => {
         this.opts.logger.error("Transport error", { error: err.message });
@@ -319,17 +330,10 @@ export class MCPServer {
       stdioTransport.onclose = () => {
         this.opts.logger.warn("Transport closed");
       };
-      await this.server.connect(stdioTransport);
+      await server.connect(stdioTransport);
       this.opts.logger.info("Server started", { transport: "stdio" });
     } else {
-      const { StreamableHTTPServerTransport } = await import("@modelcontextprotocol/sdk/server/streamableHttp.js");
       const { createServer } = await import("node:http");
-      const crypto = await import("node:crypto");
-
-      this.streamableTransport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => crypto.randomUUID(),
-      });
-      await this.server.connect(this.streamableTransport);
 
       this.httpServer = createServer(async (req, res) => {
         const url = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -349,10 +353,49 @@ export class MCPServer {
           return;
         }
 
+        const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
         try {
-          await this.streamableTransport.handleRequest(req, res);
+          if (sessionId) {
+            const session = this.sessions.get(sessionId);
+            if (!session) {
+              res.writeHead(404, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: "Session not found" }));
+              return;
+            }
+            await session.transport.handleRequest(req, res);
+          } else if (req.method === "POST") {
+            const { StreamableHTTPServerTransport } = await import(
+              "@modelcontextprotocol/sdk/server/streamableHttp.js"
+            );
+
+            const server = this.createServer();
+            const transport = new StreamableHTTPServerTransport({
+              sessionIdGenerator: () => randomUUID(),
+              onsessioninitialized: (sid: string) => {
+                this.opts.logger.info("Session initialized", { sessionId: sid });
+                this.sessions.set(sid, { transport, server });
+              },
+            });
+            transport.onclose = () => {
+              const sid = transport.sessionId;
+              if (sid && this.sessions.has(sid)) {
+                this.opts.logger.info("Session closed", { sessionId: sid });
+                this.sessions.delete(sid);
+              }
+            };
+            transport.onerror = (err: Error) => {
+              this.opts.logger.error("Transport error", { error: err.message });
+            };
+
+            await server.connect(transport);
+            await transport.handleRequest(req, res);
+          } else {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Bad Request: No session ID provided" }));
+          }
         } catch (err: any) {
-          this.opts.logger.error("Streamable HTTP handler error", { error: err.message });
+          this.opts.logger.error("HTTP handler error", { error: err.message });
           if (!res.headersSent) {
             res.writeHead(500, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Internal server error" }));
@@ -370,10 +413,14 @@ export class MCPServer {
 
   async stop() {
     this.opts.logger.info("Stopping server");
-    if (this.streamableTransport) {
-      await this.streamableTransport.close();
-      this.streamableTransport = null;
+    for (const [, session] of this.sessions) {
+      try {
+        await session.transport.close();
+      } catch {
+        // ignore close errors during shutdown
+      }
     }
+    this.sessions.clear();
     if (this.httpServer) {
       await new Promise<void>((resolve) => this.httpServer.close(() => resolve()));
       this.httpServer = null;
