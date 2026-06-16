@@ -16,6 +16,7 @@ export default defineConfig({
     alias: [
       { find: "@lib/worker/bgWorker.ts", replacement: path.resolve(__dirname, "lib/src/worker/bgWorker.mock.ts") },
       { find: "@lib", replacement: path.resolve(__dirname, "lib/src") },
+      { find: "@", replacement: path.resolve(__dirname, "lib/src") },
     ],
   },
   build: {
@@ -28,7 +29,7 @@ export default defineConfig({
     rollupOptions: {
       external: (id) => {
         if (id.startsWith(".") || id.startsWith("/")) return false;
-        if (id.startsWith("@lib/")) return false;
+        if (id.startsWith("@lib/") || id.startsWith("@/")) return false;
         if (nodeBuiltins.has(id)) return true;
         if (id.startsWith("node:")) return true;
         return false;

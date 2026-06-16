@@ -17,10 +17,16 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "fflate": "^0.8.3",
     "minimatch": "^10.2.5",
     "octagonal-wheels": "^0.1.46",
     "pouchdb": "^9.0.0",
     "pouchdb-adapter-http": "^9.0.0",
+    "pouchdb-core": "^9.0.0",
+    "pouchdb-find": "^9.0.0",
+    "pouchdb-mapreduce": "^9.0.0",
+    "pouchdb-merge": "^9.0.0",
+    "pouchdb-replication": "^9.0.0",
     "transform-pouch": "^2.0.0",
     "zod": "^3"
   },

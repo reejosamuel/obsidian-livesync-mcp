@@ -5,6 +5,11 @@ const mockDbAllDocs = vi.fn();
 const mockDbInstance: any = {
   get: mockDbGet,
   allDocs: mockDbAllDocs,
+  put: vi.fn(),
+  post: vi.fn(),
+  bulkDocs: vi.fn(),
+  transform: vi.fn(),
+  remove: vi.fn(),
 };
 
 vi.mock("pouchdb", () => ({

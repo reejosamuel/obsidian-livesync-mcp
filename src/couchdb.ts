@@ -1,13 +1,18 @@
 import PouchDB from "pouchdb";
 import PouchHttp from "pouchdb-adapter-http";
+import transformPouch from "transform-pouch";
+import "pouchdb-mapreduce";
+import "pouchdb-replication";
+import "pouchdb-find";
+
 PouchDB.plugin(PouchHttp);
+PouchDB.plugin(transformPouch);
 
 import { IDPrefixes, SALT_OF_PASSPHRASE } from "@lib/common/models/shared.const.behabiour";
 import { EntryTypes } from "@lib/common/models/db.const";
 import type { DocumentID } from "@lib/common/models/db.type";
 import { path2id_base } from "@lib/string_and_binary/path";
-import { decrypt as decryptV1 } from "octagonal-wheels/encryption/encryption";
-import { decrypt as decryptHKDF, encrypt as encryptHKDF } from "octagonal-wheels/encryption/hkdf";
+import { enableEncryption } from "@lib/pouchdb/encryption";
 import crypto from "node:crypto";
 
 export interface FileInfo {
@@ -31,16 +36,6 @@ export interface CouchDBOptions {
 }
 
 const ENCRYPTED_META_PREFIX = "/\\:";
-const ENCRYPT_HKDF_HEADER = "%=";
-const ENCRYPT_OLD_HEADER = "%";
-
-function simpleContentHash(content: string): string {
-  return crypto.createHash("sha256").update(content).digest("hex");
-}
-
-function isEncryptedChunkId(id: string): boolean {
-  return id.startsWith(IDPrefixes.EncryptedChunk);
-}
 
 function isEncryptedMetaPath(path: string): boolean {
   return path.startsWith(ENCRYPTED_META_PREFIX);
@@ -51,34 +46,43 @@ export class CouchDBClient {
   private passphrase: string | undefined;
   private cacheTtl: number;
   private requestTimeout: number;
-  private _pbkdf2Salt: Uint8Array<ArrayBuffer> | null = null;
+  private cachedSalt: Uint8Array<ArrayBuffer> | null = null;
 
   constructor(url: string, passphrase?: string, options?: CouchDBOptions) {
     this.db = new PouchDB(url, { adapter: "http" });
     this.passphrase = passphrase;
     this.cacheTtl = options?.cacheTtl ?? 60;
     this.requestTimeout = options?.requestTimeout ?? 30000;
+
+    if (this.passphrase) {
+      enableEncryption(
+        this.db as any,
+        this.passphrase,
+        false,
+        false,
+        () => this.getPbkdf2Salt(),
+        "V2",
+      );
+    }
   }
 
   private async getPbkdf2Salt(): Promise<Uint8Array<ArrayBuffer>> {
-    if (this._pbkdf2Salt) return this._pbkdf2Salt;
+    if (this.cachedSalt) return this.cachedSalt;
     try {
       const doc = await this.retry(() => this.db.get<any>("_local/obsidian_livesync_sync_parameters"));
       if (doc?.pbkdf2salt) {
-        const buf = Buffer.from(doc.pbkdf2salt, "base64");
-        this._pbkdf2Salt = Uint8Array.from(buf);
-        return this._pbkdf2Salt;
+        const salt = Uint8Array.from(Buffer.from(doc.pbkdf2salt, "base64"));
+        this.cachedSalt = salt;
+        return salt;
       }
     } catch {
       // fall through to default
     }
-    this._pbkdf2Salt = Uint8Array.from(
-      crypto
-        .createHash("sha256")
-        .update(this.passphrase || "")
-        .digest(),
+    const salt = Uint8Array.from(
+      crypto.createHash("sha256").update(this.passphrase || "").digest(),
     );
-    return this._pbkdf2Salt;
+    this.cachedSalt = salt;
+    return salt;
   }
 
   async listFiles(prefix?: string): Promise<FileInfo[]> {
@@ -130,10 +134,7 @@ export class CouchDBClient {
         if (!("doc" in row) || !row.doc) continue;
         if (row.doc.type !== EntryTypes.CHUNK) continue;
 
-        let data = row.doc.data || "";
-        if (this.passphrase) {
-          data = await this.decryptData(data, row.doc._id);
-        }
+        const data = row.doc.data || "";
         content += data;
       }
       return content;
@@ -146,14 +147,11 @@ export class CouchDBClient {
   async storeContent(path: string, content: string): Promise<boolean> {
     try {
       const docId = await this.pathToId(path);
-      const chunkHash = simpleContentHash(content);
+      const chunkHash = crypto.createHash("sha256").update(content).digest("hex");
 
-      let chunkId: string;
-      if (this.passphrase) {
-        chunkId = `${IDPrefixes.EncryptedChunk}${chunkHash}`;
-      } else {
-        chunkId = `${IDPrefixes.Chunk}${chunkHash}`;
-      }
+      const chunkId = this.passphrase
+        ? `${IDPrefixes.EncryptedChunk}${chunkHash}`
+        : `${IDPrefixes.Chunk}${chunkHash}`;
 
       let existingMeta: any = null;
       let oldChunkIds: string[] = [];
@@ -164,19 +162,11 @@ export class CouchDBClient {
         // new file
       }
 
-      let chunkData = content;
-      if (this.passphrase) {
-        chunkData = await this.encryptData(content);
-      }
-
       const chunkBody: Record<string, any> = {
         _id: chunkId,
         type: EntryTypes.CHUNK,
-        data: chunkData,
+        data: content,
       };
-      if (this.passphrase) {
-        chunkBody.e_ = true;
-      }
       try {
         await this.retry(() => this.db.get(chunkId));
       } catch {
@@ -195,7 +185,7 @@ export class CouchDBClient {
         children: [chunkId],
         ctime: storeCtime,
         mtime: Date.now(),
-        size: new Blob([content]).size,
+        size: Buffer.byteLength(content, "utf-8"),
       };
 
       if (existingMeta) {
@@ -338,40 +328,13 @@ export class CouchDBClient {
     };
   }
 
-  private async decryptData(data: string, docId: string): Promise<string> {
-    if (!this.passphrase) return data;
-
-    if (isEncryptedChunkId(docId) || data.startsWith(ENCRYPT_HKDF_HEADER)) {
-      try {
-        const salt = await this.getPbkdf2Salt();
-        return await decryptHKDF(data, this.passphrase, salt);
-      } catch {
-        // fallback to V1
-      }
-    }
-
-    if (data.startsWith(ENCRYPT_OLD_HEADER)) {
-      try {
-        return await decryptV1(data, this.passphrase, true);
-      } catch {
-        return await decryptV1(data, this.passphrase, false);
-      }
-    }
-
-    return data;
-  }
-
-  private async encryptData(data: string): Promise<string> {
-    const salt = await this.getPbkdf2Salt();
-    return await encryptHKDF(data, this.passphrase!, salt);
-  }
-
   private async resolvePath(doc: any): Promise<string | null> {
     let filePath = doc.path;
     if (isEncryptedMetaPath(filePath) && this.passphrase) {
       try {
         const encrypted = filePath.slice(ENCRYPTED_META_PREFIX.length);
         const salt = await this.getPbkdf2Salt();
+        const { decrypt: decryptHKDF } = await import("octagonal-wheels/encryption/hkdf");
         const decrypted = await decryptHKDF(encrypted, this.passphrase + SALT_OF_PASSPHRASE, salt);
         const parsed = JSON.parse(decrypted);
         filePath = parsed.path;
